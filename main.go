@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"math"
 	"os"
 )
@@ -13,7 +12,7 @@ type Ratio struct {
 	Value float64
 }
 
-// vda implements the Vendor Distribution Algorithm.
+// vsda implements the Vendor Slot Distribution Algorithm.
 //
 // How it works:
 //
@@ -41,59 +40,47 @@ type Ratio struct {
 //
 // Constraints:
 //
+//	minimum allocation is 1, maximum is db count
 //	vendors <= limit
-func vda(ratio map[string]float64, priority []string, dbcount map[string]int, limit int) []string {
-
-	// Step: DB count check
-	var availableRatio float64
-
-	// Create copies of the input maps to avoid modifying the original data
-	ratioCopy := make(map[string]float64)
-	maps.Copy(ratioCopy, ratio)
-
-	dbCountCopy := make(map[string]int)
-	maps.Copy(dbCountCopy, dbcount)
-
-	priorityCopy := make([]string, len(priority))
-	copy(priorityCopy, priority)
+func vsda(ratio map[string]float64, priority []string, dbcount map[string]int, limit int) []string {
+	// These maps will hold the active vendors after filtering out those with 0 db count, and their corresponding ratios and db counts.
+	activeRatio := make(map[string]float64)
+	activeDB := make(map[string]int)
+	removed := make(map[string]bool)
+	var totalRatio float64
 
 	// Remove that shares that has 0 db count, calculate based on remaining sum shares
 	removedPriority := make(map[string]bool)
-	for key, vendor := range dbCountCopy {
-		if vendor == 0 {
-			delete(dbCountCopy, key)
-			delete(ratioCopy, key)
-			removedPriority[key] = true
+	for _, key := range priority {
+		if dbcount[key] == 0 {
+			removed[key] = true
 			continue
 		}
-		availableRatio += ratioCopy[key]
+		activeRatio[key] = ratio[key]
+		activeDB[key] = dbcount[key]
+		totalRatio += ratio[key]
 	}
 
-	if len(ratioCopy) > limit {
+	if len(activeRatio) > limit {
 		fmt.Println("Error: Total vendors exceed the limit.")
 		return nil
 	}
 
 	// remove vendor from priority if it is removed in previous step
 	var updatedPriority []string
-	for _, key := range priorityCopy {
+	for _, key := range priority {
 		if !removedPriority[key] {
 			updatedPriority = append(updatedPriority, key)
 		}
 	}
 
-	// Step: Vendor Wise Initial Count
-	vendorCount := make(map[string]int)
-
-	// Calculate the initial counts from ratio and limit
-	for key, value := range ratioCopy {
-		vendorCount[key] = int(math.Ceil((value / availableRatio) * float64(limit)))
-	}
-
-	// sum of initial counts
+	// Calculate the initial counts from ratio and limit, and sum the total allocated count for all vendors.
 	vendorCountTotal := 0
-	for _, count := range vendorCount {
-		vendorCountTotal += count
+	vendorCount := make(map[string]int)
+	for key, value := range activeRatio {
+		c := int(math.Ceil((value / totalRatio) * float64(limit)))
+		vendorCount[key] = c
+		vendorCountTotal += c
 	}
 
 	// calculate extras after initial rounding
@@ -124,9 +111,9 @@ func vda(ratio map[string]float64, priority []string, dbcount map[string]int, li
 	remainingSlots := 0
 	exhaustedVendors := make(map[string]bool)
 	for key, count := range vendorCount {
-		if dbCountCopy[key] <= count {
-			remainingSlots += count - dbCountCopy[key]
-			vendorCount[key] = dbCountCopy[key]
+		if activeDB[key] <= count {
+			remainingSlots += count - activeDB[key]
+			vendorCount[key] = activeDB[key]
 			exhaustedVendors[key] = true
 		}
 	}
@@ -147,7 +134,7 @@ func vda(ratio map[string]float64, priority []string, dbcount map[string]int, li
 		vendorCount[key]++
 		remainingSlots--
 
-		if vendorCount[key] < dbCountCopy[key] {
+		if vendorCount[key] < activeDB[key] {
 			queue = append(queue, key)
 		}
 	}
@@ -182,7 +169,7 @@ func main() {
 
 	for _, testCase := range testCases {
 		fmt.Printf("Test Case: %s\n", testCase.Description)
-		result := vda(testCase.Ratio, testCase.Priority, testCase.DBCount, testCase.Limit)
+		result := vsda(testCase.Ratio, testCase.Priority, testCase.DBCount, testCase.Limit)
 		fmt.Println("Limit:", testCase.Limit)
 		fmt.Printf("Ratio: %v\n", testCase.Ratio)
 		fmt.Printf("Priority: %v\n", testCase.Priority)
