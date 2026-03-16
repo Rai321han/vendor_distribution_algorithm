@@ -7,28 +7,28 @@
     "limit": 8
   },
   {
-    "description": "All vendors equal ratio",
+    "description": "All partners equal ratio",
     "ratio": {"A": 1, "B": 1, "C": 1},
     "priority": ["A","B","C"],
     "dbCount": {"A": 2, "B": 2, "C": 2},
     "limit": 5
   },
   {
-    "description": "Vendors > limit",
+    "description": "partners > limit",
     "ratio": {"A": 1, "B": 1, "C": 1, "D": 1},
     "priority": ["A","B","C","D"],
     "dbCount": {"A": 2, "B": 2, "C": 2, "D": 2},
     "limit": 3
   },
   {
-    "description": "Vendor with 0 DB count removed",
+    "description": "Partner with 0 DB count removed",
     "ratio": {"A": 50, "B": 50},
     "priority": ["A","B"],
     "dbCount": {"A": 0, "B": 3},
     "limit": 2
   },
   {
-    "description": "Single vendor",
+    "description": "Single partner",
     "ratio": {"A": 100},
     "priority": ["A"],
     "dbCount": {"A": 5},
@@ -42,7 +42,7 @@
     "limit": 5
   },
   {
-    "description": "All vendors have DB count zero",
+    "description": "All partners have DB count zero",
     "ratio": {"A": 50, "B": 50},
     "priority": ["A","B"],
     "dbCount": {"A": 0, "B": 0},
