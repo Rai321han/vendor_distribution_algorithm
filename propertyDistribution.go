@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -11,19 +10,18 @@ type Ratio struct {
 }
 
 // propertyDistribution is a function that distributes a limited number of slots among partners based on their specified ratios and priorities, while also considering the available slots for each partner in the database.
-// 
+//
 // It takes a ratio map (partner key to ratio), a priority list of partner keys, a db count map (partner key to available slots), and a limit on total slots to distribute.
-// 
+//
 // It returns a list of partner keys representing the allocated slots, ordered by priority.
-// 
 //
 // example usage:
-// 	ratio := map[string]float64{"partnerA": 50, "partnerB": 30, "partnerC": 20}
-// 	priority := []string{"partnerA", "partnerB", "partnerC"}
-// 	dbcount := map[string]int{"partnerA": 5, "partnerB": 3, "partnerC": 2}
-// 	limit := 7
-// 	result := propertyDistribution(ratio, priority, dbcount, limit)
 //
+//	ratio := map[string]float64{"partnerA": 50, "partnerB": 30, "partnerC": 20}
+//	priority := []string{"partnerA", "partnerB", "partnerC"}
+//	dbcount := map[string]int{"partnerA": 5, "partnerB": 3, "partnerC": 2}
+//	limit := 7
+//	result := propertyDistribution(ratio, priority, dbcount, limit)
 //
 // How it works:
 //
@@ -36,8 +34,7 @@ type Ratio struct {
 //  3. Sum the initial allocations and determine extras
 //     (extras = totalAllocated - limit).
 //
-//  4. If extras exist, subtract from the highest priority partner
-//     first, then continue to lower priority partners until the
+//  4. If extras exist, subtract from the highest priority partner first, if highest priority partner has 1, then subtract from next higher and so on. If extras still remains or all partner has 1 allocaiton, then continue subtraction from lowest priority to highest partners until the
 //     extras are removed.
 //
 //  5. Check for exhausted partners (where db count < allocated count)
@@ -46,16 +43,27 @@ type Ratio struct {
 //  6. Distribute the remaining slots to non-exhausted partners based
 //     on priority until all slots are filled or no partners remain.
 //
-//  7. Return the final allocation as a list of partner keys, ordered by priority.
+//  7. If total allocated count exceeds the limit, remove in round robin manner from lowest priority to highest until total allocated count is equal to limit.
+//
+//  8. Return the final allocation as a list of partner keys, ordered by priority.
 //
 // Constraints:
 //
 //	minimum allocation is 1, maximum is db count
 //	1 <= limit
-// 	total partners <= limit
-// 	dbcount[partner] >= 0
-// 	ratio[partner] >= 0
+//	dbcount[partner] >= 0
+//	ratio[partner] >= 0
 func propertyDistribution(ratio map[string]float64, priority []string, dbcount map[string]int, limit int) []string {
+
+	// length of ratio, priority and dbcount should be same.
+	ratioLength := len(ratio)
+	priorityLength := len(priority)
+	dbcountLength := len(dbcount)
+
+	if ratioLength != priorityLength || ratioLength != dbcountLength {
+		return []string{}
+	}
+
 	// These maps will hold the active partners after filtering out those with 0 db count, and their corresponding ratios and db counts.
 	activeRatio := make(map[string]float64)
 	activeDB := make(map[string]int)
@@ -63,7 +71,6 @@ func propertyDistribution(ratio map[string]float64, priority []string, dbcount m
 	var totalRatio float64
 
 	// Remove that shares that has 0 db count, calculate based on remaining sum shares
-	removedPriority := make(map[string]bool)
 	for _, key := range priority {
 		if dbcount[key] == 0 {
 			removed[key] = true
@@ -74,15 +81,10 @@ func propertyDistribution(ratio map[string]float64, priority []string, dbcount m
 		totalRatio += ratio[key]
 	}
 
-	if len(activeRatio) > limit {
-		fmt.Println("Error: Total partners exceed the limit.")
-		return nil
-	}
-
 	// remove partner from priority if it is removed in previous step
 	var updatedPriority []string
 	for _, key := range priority {
-		if !removedPriority[key] {
+		if !removed[key] {
 			updatedPriority = append(updatedPriority, key)
 		}
 	}
@@ -112,11 +114,16 @@ func propertyDistribution(ratio map[string]float64, priority []string, dbcount m
 	}
 
 	// untill extras are removed, subtract from lowest priority if it has more than 1 share, then move to higher priority
-	for extras > 0 {
+	exhaustedAfterRemoved := len(partnerWiseCount)
+	for extras > 0 && exhaustedAfterRemoved > 0 {
 		for i := len(updatedPriority) - 1; i >= 0 && extras > 0; i-- {
 			if partnerWiseCount[updatedPriority[i]] > 1 {
 				partnerWiseCount[updatedPriority[i]]--
 				extras--
+			}
+
+			if partnerWiseCount[updatedPriority[i]] == 1 {
+				exhaustedAfterRemoved--
 			}
 		}
 	}
@@ -134,6 +141,7 @@ func propertyDistribution(ratio map[string]float64, priority []string, dbcount m
 
 	var queue []string
 
+	// Distribute remaining slots to non-exhausted partners based on priority until all slots are filled or no partners remain.
 	if remainingSlots > 0 {
 		for i := len(updatedPriority) - 1; i >= 0; i-- {
 			key := updatedPriority[i]
@@ -151,6 +159,22 @@ func propertyDistribution(ratio map[string]float64, priority []string, dbcount m
 
 			if partnerWiseCount[key] < activeDB[key] {
 				queue = append(queue, key)
+			}
+		}
+	}
+
+	// limit < partners
+	// only possible when all partners have at most 1 allocaiton
+	// in that case we will remove in round robin manner from lowest priority to highest until total allocated count is equal to limit.
+	// that means we need to remove (partners - limit) partners from the parterWise map
+	if len(partnerWiseCount) > limit {
+		toRemove := len(partnerWiseCount) - limit
+		// remove from lowest priority to highest until we removed required number of partners
+		for i := len(updatedPriority) - 1; i >= 0 && toRemove > 0; i-- {
+			key := updatedPriority[i]
+			if _, exists := partnerWiseCount[key]; exists {
+				delete(partnerWiseCount, key)
+				toRemove--
 			}
 		}
 	}
