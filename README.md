@@ -1,5 +1,15 @@
 # Property Distribution Algorithm
 
+## Content Outline:
+- [Overview](#overview)
+- [Inputs and Output](#inputs-and-output)
+- [Validation and Assumptions](#validation-and-assumptions)
+- [How It Works](#how-it-works)
+- [Deterministic Properties](#deterministic-properties)
+- [Complexity](#complexity)
+- [Running Tests](#running-tests)
+
+
 ## Overview
 
 This project implements a partner slot distribution algorithm that allocates a
@@ -103,16 +113,21 @@ Given the same input maps/slice values, output is deterministic because:
 
 Let:
 
-- `n` = number of active partners (`dbcount > 0`)
+- `n` = number of partners
 - `L` = `limit`
 
 ### Time Complexity
 
-- Filtering and map preparation: `O(n)`
-- Initial allocation and capping passes: `O(n)`
-- Extra-removal pass: worst-case `O(n^2)` in the current implementation
-- Freed-slot redistribution: `O(n + L)`
-- Round-robin sequence construction: worst-case `O(n * L)`
+Overall propertyDistribution:
+ |  Phase    |   Complexity   |
+ | --------- | -------------- |
+ | filterActive | O(n) |
+ | ceilAllocate | O(n) |
+ | removeExtras | O(n²) worst, O(n) typical |
+ | capAtDBCount | O(n) |
+ | redistributeFreed | O(n + L) |
+ | dropLowestPriority | O(n) |
+ | buildSequence | O(L · n) worst, O(L) typical |
 
 Overall worst-case time complexity:
 
