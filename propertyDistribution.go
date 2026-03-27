@@ -43,32 +43,24 @@ func propertyDistribution(
 		return []string{}
 	}
 
-	// Step 1 – drop partners with no available db counts.
 	activePriority, activeRatio, activeDB := filterActive(priority, ratio, dbcount)
 	if len(activePriority) == 0 {
 		return []string{}
 	}
 
-	// Step 2 – ceiling-allocate initial shares.
 	allocated := ceilAllocate(activePriority, activeRatio, limit)
-
-	// Step 3 – remove over-allocation caused by ceiling rounding.
 	removeExtras(allocated, activePriority, limit)
 
-	// Step 4 – cap at dbcount and collect freed slots.
 	exhausted, freed := capAtDBCount(allocated, activeDB)
 
-	// Step 5 – give freed slots back to non-exhausted partners.
 	if freed > 0 {
 		redistributeFreed(allocated, activePriority, activeDB, exhausted, freed)
 	}
 
-	// Step 6 – if partners outnumber limit (all at 1), drop lowest-priority.
 	if len(allocated) > limit {
 		dropLowestPriority(allocated, activePriority, len(allocated)-limit)
 	}
 
-	// Step 7 – emit priority ordered partners sequence.
 	return buildSequence(allocated, activePriority)
 }
 

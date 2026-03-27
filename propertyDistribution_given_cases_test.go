@@ -40,12 +40,21 @@ func TestPropertyDistributionGivenCases(t *testing.T) {
 		},
 		{
 			Ratio: map[string]float64{
+				"11": 60,
+				"12": 25,
+				"24": 15,
+			},
+			Limit:    10,
+			Expected: []string{"11", "12", "24", "11", "12", "24", "11", "12", "11", "11"},
+		},
+		{
+			Ratio: map[string]float64{
 				"11": 70,
 				"12": 15,
 				"24": 15,
 			},
-			Limit:    1,
-			Expected: []string{"11"},
+			Limit:    5,
+			Expected: []string{"11", "12", "24", "11", "11"},
 		},
 		{
 			Ratio: map[string]float64{
