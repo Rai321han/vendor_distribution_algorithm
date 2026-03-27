@@ -119,15 +119,15 @@ Let:
 ### Time Complexity
 
 Overall propertyDistribution:
- |  Phase    |   Complexity   |
+ |  Stages    |   Complexity   |
  | --------- | -------------- |
- | filterActive | O(n) |
- | ceilAllocate | O(n) |
- | removeExtras | O(n²) worst, O(n) typical |
- | capAtDBCount | O(n) |
- | redistributeFreed | O(n + L) |
- | dropLowestPriority | O(n) |
- | buildSequence | O(L · n) worst, O(L) typical |
+ | Filter Active Partners | O(n) |
+ | Initial Ratio Allocation (Ceiling) | O(n) |
+ | Remove Ceiling Extras | O(n²) worst, O(n) typical |
+ | Cap by Capacity | O(n) |
+ | Redistribute Freed Slots | O(n + L) |
+ | Drop Lowest Priority | O(n) |
+ | Build Final Sequence | O(L · n) worst, O(L) typical |
 
 Overall worst-case time complexity:
 
