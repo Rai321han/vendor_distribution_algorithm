@@ -123,16 +123,16 @@ Overall propertyDistribution:
  | --------- | -------------- |
  | Filter Active Partners | O(n) |
  | Initial Ratio Allocation (Ceiling) | O(n) |
- | Remove Ceiling Extras | O(n²) worst, O(n) typical |
+ | Remove Ceiling Extras  | O(n²)  <span style="color: rgb(192, 125, 1);">*needs improvement* |
  | Cap by Capacity | O(n) |
  | Redistribute Freed Slots | O(n + L) |
  | Drop Lowest Priority | O(n) |
- | Build Final Sequence | O(L · n) worst, O(L) typical |
+ | Build Final Sequence | O(n + L)|
 
 Overall worst-case time complexity:
 
 $$
-O(n^2 + nL)
+O(n^2 + L)
 $$
 
 ### Space Complexity

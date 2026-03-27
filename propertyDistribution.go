@@ -15,7 +15,7 @@ import (
 //   - dbcount:  partners → available counts in the database
 //   - limit:    total slots
 //
-// Returns a sequence of partners ordered by priority.
+// Returns a sequence of partners' feeds ordered by priority.
 //
 // Algorithm:
 //  1. Filter out partners with dbcount == 0 and normalise ratios.
@@ -31,8 +31,7 @@ import (
 // Constraints:
 //
 //	limit >= 1
-//	dbcount[p] >= 0, ratio[p] >= 0
-//	minimum allocation per active partner: 1
+//	dbcount[p] >= 0, ratio[p] >= 0 for all partners p
 func propertyDistribution(
 	ratio map[string]float64,
 	priority []string,
@@ -200,21 +199,27 @@ func dropLowestPriority(allocated map[string]int, priority []string, n int) {
 // buildSequence emits all allocated partner slots in round-robin priority
 // order (highest priority partner first in each round).
 func buildSequence(allocated map[string]int, priority []string) []string {
+	active := make([]string, 0, len(allocated))
+	for _, key := range priority {
+		if allocated[key] > 0 {
+			active = append(active, key)
+		}
+	}
+
 	counts := make(map[string]int, len(allocated))
 	maps.Copy(counts, allocated)
 
 	var result []string
-	for len(counts) > 0 {
-		for _, key := range priority {
-			if counts[key] <= 0 {
-				continue
-			}
+	for len(active) > 0 {
+		next := active[:0]
+		for _, key := range active {
 			result = append(result, key)
 			counts[key]--
-			if counts[key] == 0 {
-				delete(counts, key)
+			if counts[key] > 0 {
+				next = append(next, key)
 			}
 		}
+		active = next
 	}
 	return result
 }
