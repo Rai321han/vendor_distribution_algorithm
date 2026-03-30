@@ -3,6 +3,7 @@ package main
 import (
 	"maps"
 	"math"
+	"sort"
 )
 
 // propertyDistribution distributes a limited number of slots among partners
@@ -103,18 +104,13 @@ func ceilAllocate(priority []string, activeRatio map[string]float64, limit int) 
 	return allocated
 }
 
-// removeExtras reduces the over-allocation caused by ceiling rounding.
-//
-// It first tries the highest-priority partner (preserving high-priority slots),
-// then sweeps lowest→highest for any remainder.
-// No partner is reduced below 1.
 func removeExtras(allocated map[string]int, priority []string, limit int) {
 	extras := sumValues(allocated) - limit
+
 	if extras == 0 {
 		return
 	}
 
-	// Pass 1: try the single highest-priority partner.
 	for _, key := range priority {
 		if allocated[key] > 1 {
 			allocated[key]--
@@ -123,18 +119,65 @@ func removeExtras(allocated map[string]int, priority []string, limit int) {
 		}
 	}
 
-	// Pass 2: sweep lowest→highest until extras are gone.
-	exhausted := 0
-	for extras > 0 && exhausted < len(allocated) {
-		for i := len(priority) - 1; i >= 0 && extras > 0; i-- {
-			if allocated[priority[i]] > 1 {
-				allocated[priority[i]]--
-				extras--
-			}
-			if allocated[priority[i]] == 1 {
-				exhausted++
-			}
+	if extras == 0 {
+		return
+	}
+
+	// calculate removable
+	removable := make(map[string]int, len(allocated))
+	for _, key := range priority {
+		if allocated[key] > 1 {
+			removable[key] = allocated[key] - 1
 		}
+	}
+
+	var removableList []int
+	for _, key := range priority {
+		if r, ok := removable[key]; ok {
+			removableList = append(removableList, r)
+		}
+	}
+
+	// sort the slice of pairs by count
+	sort.Slice(removableList, func(i, j int) bool {
+		return removableList[i] < removableList[j]
+	})
+
+	totalRounds := 0
+	active := len(removableList) // partners who can still be reduced
+	prev := 0
+
+	for i := 0; i < len(removableList); i++ {
+		cur := removableList[i] // next exhaustion point
+		gap := cur - prev       // how many rounds before this partner exhausts
+
+		cost := gap * active // extras needed for those rounds
+
+		if extras >= cost {
+			totalRounds += gap
+			extras -= cost
+			active-- // this partner is now exhausted
+			prev = cur
+		} else {
+			// cannot finish this gap → partial rounds
+			rounds := extras / active
+			totalRounds += rounds
+			extras -= rounds * active
+			break
+		}
+	}
+
+	for p := range allocated {
+		if _, ok := removable[p]; ok {
+			reduce := min(removable[p], totalRounds)
+			allocated[p] -= reduce
+		}
+	}
+
+	for i := len(priority) - 1; i >= 0 && extras > 0; i-- {
+		p := priority[i]
+		allocated[p]--
+		extras--
 	}
 }
 
