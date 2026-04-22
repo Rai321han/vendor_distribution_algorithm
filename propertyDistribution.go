@@ -51,10 +51,10 @@ func propertyDistribution(
 	allocated := ceilAllocate(activePriority, activeRatio, limit)
 	removeExtras(allocated, activePriority, limit)
 
-	exhausted, freed := capAtDBCount(allocated, activeDB)
+	freed := capAtDBCount(allocated, activeDB)
 
 	if freed > 0 {
-		redistributeFreed(allocated, activePriority, activeDB, exhausted, freed)
+		redistributeFreed(allocated, activePriority, activeDB, freed)
 	}
 
 	if len(allocated) > limit {
@@ -96,29 +96,16 @@ func ceilAllocate(priority []string, activeRatio map[string]float64, limit int) 
 	for _, key := range priority {
 		share := activeRatio[key] / totalRatio
 		count := int(math.Ceil(share * float64(limit)))
-		if count < 1 {
-			count = 1
-		}
+		count = max(count, 1)
 		allocated[key] = count
 	}
 	return allocated
 }
 
-// How removeExtras works:
-// 1. Calculate how many extras we have: sum of allocated - limit.
-// 2. If extras > 0, try to remove one slot from the highest-priority partner
-//    that has more than 1 slot allocated. This ensures we don't reduce any
-//    partner to zero if they were allocated at least 1 slot.
-// 3. If there are still extras after step 2, we need to remove more slots.
-//    We calculate how many slots can be removed from each partner (allocated - 1)
-//    and sort these counts in ascending order.
-// 4. We then iterate through the sorted removable counts, removing slots in
-//    rounds until we've removed all extras. In each round, we remove one slot
-//    from all partners that still have removable slots until we exhaust the next
-//    partner's removable count, then move on to the next one.
-// 5. Finally, if there are still extras left (which can happen if all partners had only 1 slot to remove), we remove them from the lowest-priority partners one by one until we've removed all extras.
-
-// removeExtras reduces the allocated counts to remove any extras above the limit.
+// removeExtras removes any overallocation from ceiling rounding, starting with the highest-priority partner (if it has more than 1 slot),
+// then sweeping from lowest to highest priority until we've removed enough extras.
+// This ensures we don't unfairly penalise lower-priority partners for the ceiling rounding of higher-priority ones,
+// while still respecting the priority order when removing extras.
 func removeExtras(allocated map[string]int, priority []string, limit int) {
 	extras := sumValues(allocated) - limit
 
@@ -138,7 +125,6 @@ func removeExtras(allocated map[string]int, priority []string, limit int) {
 		return
 	}
 
-	// calculate removable
 	removable := make(map[string]int, len(allocated))
 	for _, key := range priority {
 		if allocated[key] > 1 {
@@ -152,94 +138,49 @@ func removeExtras(allocated map[string]int, priority []string, limit int) {
 			removableList = append(removableList, r)
 		}
 	}
-
-	// sort the slice of pairs by count
-	sort.Slice(removableList, func(i, j int) bool {
-		return removableList[i] < removableList[j]
-	})
-
-	totalRounds := 0
-	active := len(removableList) // partners who can still be reduced
-	prev := 0
-
-	for i := 0; i < len(removableList); i++ {
-		cur := removableList[i] // next exhaustion point
-		gap := cur - prev       // how many rounds before this partner exhausts
-
-		cost := gap * active // extras needed for those rounds
-
-		if extras >= cost {
-			totalRounds += gap
-			extras -= cost
-			active-- // this partner is now exhausted
-			prev = cur
-		} else {
-			// cannot finish this gap → partial rounds
-			rounds := extras / active
-			totalRounds += rounds
-			extras -= rounds * active
-			break
-		}
-	}
-
-	for p := range allocated {
-		if _, ok := removable[p]; ok {
-			reduce := min(removable[p], totalRounds)
-			allocated[p] -= reduce
-		}
-	}
-
-	for i := len(priority) - 1; i >= 0 && extras > 0; i-- {
-		p := priority[i]
-		allocated[p]--
-		extras--
-	}
+	rebalanceAllocation(allocated, priority, removableList, removable, extras, -1)
 }
 
 // capAtDBCount ensures no partner is allocated more than its db count.
-// It returns which partners are now exhausted and the total freed slots.
-func capAtDBCount(allocated, activeDB map[string]int) (exhausted map[string]bool, freed int) {
-	exhausted = make(map[string]bool)
+// It returns the total freed slots.
+func capAtDBCount(allocated, activeDB map[string]int) int {
+	freed := 0
 	for key, count := range allocated {
 		if count >= activeDB[key] {
 			freed += count - activeDB[key]
 			allocated[key] = activeDB[key]
-			exhausted[key] = true
 		}
 	}
-	return
+	return freed
 }
 
-// redistributeFreed hands freed slots one at a time to non-exhausted partners,
-// highest priority first. A partner leaves the rotation once it reaches its
-// db count.
+// redistributeFreed takes any slots freed by capping at db count and redistributes them to non-exhausted partners in priority order,
+// respecting their capacity to receive more slots (activeDB - allocated). It uses the same rebalanceAllocation helper as removeExtras,
+// but with positive units to add rather than remove.
 func redistributeFreed(
 	allocated map[string]int,
 	priority []string,
 	activeDB map[string]int,
-	exhausted map[string]bool,
 	freed int,
 ) {
-	// Seed the queue lowest->highest priority.
-	queue := make([]string, 0, len(priority))
-	for i := len(priority) - 1; i >= 0; i-- {
-		key := priority[i]
-		if !exhausted[key] {
-			queue = append(queue, key)
-		}
+
+	if freed == 0 {
+		return
 	}
+	canAdd := make(map[string]int, len(allocated))
 
-	for freed > 0 && len(queue) > 0 {
-		key := queue[0]
-		queue = queue[1:]
-
-		allocated[key]++
-		freed--
-
+	for _, key := range priority {
 		if allocated[key] < activeDB[key] {
-			queue = append(queue, key) // still has room; re-enqueue
+			canAdd[key] = activeDB[key] - allocated[key]
 		}
 	}
+	var canAddList []int
+	for _, key := range priority {
+		if c, ok := canAdd[key]; ok {
+			canAddList = append(canAddList, c)
+		}
+	}
+	rebalanceAllocation(allocated, priority, canAddList, canAdd, freed, +1)
 }
 
 // dropLowestPriority removes n lowest-priority partners from the allocation
@@ -250,6 +191,92 @@ func dropLowestPriority(allocated map[string]int, priority []string, n int) {
 		if _, ok := allocated[priority[i]]; ok {
 			delete(allocated, priority[i])
 			n--
+		}
+	}
+}
+
+// rebalanceAllocation is a helper for both removeExtras and redistributeFreed.
+//
+// It takes:
+//
+//	participants:
+//
+// a list of integers indicating availiability for removal or addition.
+// For removeExtras, this is how many slots can be removed from each partner (allocated - 1).
+// For redistributeFreed, this is how many slots can be added to each partner (activeDB - allocated).
+//
+//	priority:
+//
+// the list of partners in priority order.
+//
+//	allocated:
+//
+// the current allocation map that we will modify in place.
+//
+//	capacity:
+//
+// the maximum capacity for each partner (either removable or addable).
+//
+//	units:
+//
+// how many slots we need to remove (negative) or add (positive).
+//
+//	sign:
+//
+// +1 indicates we are adding slots (redistributeFreed), -1 indicates we are removing slots (removeExtras).
+//
+// This algorithm is more efficient than removing/adding one slot at a time.
+// It calculates how many full rounds we can do with the current participants before we exhaust the next partner, and removes/adds that many slots in one go, then moves on to the next partner.
+// This way we can remove/add multiple slots in one iteration instead of one by one, which is more efficient when we have a large number of slots to remove/add.
+// If we exhaust all participants but still have slots to remove/add, we will continue removing/adding from the lowest priority partners until we've removed/added all required slots respecting the capacity constraints.
+func rebalanceAllocation(allocated map[string]int,
+	priority []string,
+	participants []int,
+	capacity map[string]int,
+	units int,
+	sign int,
+) {
+
+	sort.Slice(participants, func(i, j int) bool {
+		return participants[i] < participants[j]
+	})
+
+	totalRounds := 0
+	active := len(participants) // participants who can still be reduced
+	prev := 0
+
+	for i := range participants {
+		cur := participants[i] // next exhaustion point
+		gap := cur - prev      // how many rounds before this participant exhausts
+
+		cost := gap * active // needs for those rounds
+
+		if units >= cost {
+			totalRounds += gap
+			units -= cost
+			active-- // this participant is now exhausted
+			prev = cur
+		} else {
+			rounds := units / active
+			totalRounds += rounds
+			units -= rounds * active
+			break
+		}
+	}
+
+	for p := range allocated {
+		if cap, ok := capacity[p]; ok {
+			change := min(cap, totalRounds) // how many we can actually remove/add for this partner
+			allocated[p] += change * sign   // apply the change with the correct sign
+		}
+	}
+
+	// If we still have units to remove/add after exhausting all participants, we continue removing/adding from the lowest priority partners until we've removed/added all required slots respecting the capacity constraints.
+	for i := len(priority) - 1; i >= 0 && units > 0; i-- {
+		p := priority[i]
+		if _, ok := capacity[p]; ok {
+			allocated[p] += sign
+			units--
 		}
 	}
 }

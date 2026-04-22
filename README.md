@@ -125,15 +125,29 @@ Overall propertyDistribution:
 | Initial Ratio Allocation (Ceiling) | O(n) |
 | Remove Ceiling Extras | O(nlogn) |
 | Cap by Capacity | O(n) |
-| Redistribute Freed Slots | O(n + L) |
+| Redistribute Freed Slots | O(nlogn) |
 | Drop Lowest Priority | O(n) |
 | Build Final Sequence | O(n + L)|
 
 Overall worst-case time complexity:
 
 $$
+when,  L >> n
+$$
+
+$$
 O(n\log n + L)
 $$
+
+$$
+otherwise
+$$
+
+$$
+O(n\log n)
+$$
+
+We cannot improve buildsequence beyond O(n + L) because we must iterate through all partners to build the output, and the output itself can be up to O(L) in size.
 
 ### Space Complexity
 
