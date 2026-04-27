@@ -107,7 +107,11 @@ func ceilAllocate(priority []string, activeRatio map[string]float64, limit int) 
 // This ensures we don't unfairly penalise lower-priority partners for the ceiling rounding of higher-priority ones,
 // while still respecting the priority order when removing extras.
 func removeExtras(allocated map[string]int, priority []string, limit int) {
-	extras := sumValues(allocated) - limit
+	extras := 0
+	for _, v := range allocated {
+		extras += v
+	}
+	extras -= limit
 
 	if extras == 0 {
 		return
@@ -125,33 +129,11 @@ func removeExtras(allocated map[string]int, priority []string, limit int) {
 		return
 	}
 
-	removable := make(map[string]int, len(allocated))
-	for _, key := range priority {
-		if allocated[key] > 1 {
-			removable[key] = allocated[key] - 1
-		}
-	}
+	capacity := buildCapacity(priority, func(k string) int {
+		return allocated[k] - 1
+	})
 
-	var removableList []int
-	for _, key := range priority {
-		if r, ok := removable[key]; ok {
-			removableList = append(removableList, r)
-		}
-	}
-	rebalanceAllocation(allocated, priority, removableList, removable, extras, -1)
-}
-
-// capAtDBCount ensures no partner is allocated more than its db count.
-// It returns the total freed slots.
-func capAtDBCount(allocated, activeDB map[string]int) int {
-	freed := 0
-	for key, count := range allocated {
-		if count >= activeDB[key] {
-			freed += count - activeDB[key]
-			allocated[key] = activeDB[key]
-		}
-	}
-	return freed
+	rebalanceAllocation(allocated, priority, capacity, extras, -1)
 }
 
 // redistributeFreed takes any slots freed by capping at db count and redistributes them to non-exhausted partners in priority order,
@@ -167,20 +149,34 @@ func redistributeFreed(
 	if freed == 0 {
 		return
 	}
-	canAdd := make(map[string]int, len(allocated))
+	capacity := buildCapacity(priority, func(k string) int {
+		return activeDB[k] - allocated[k]
+	})
+	rebalanceAllocation(allocated, priority, capacity, freed, +1)
+}
 
-	for _, key := range priority {
-		if allocated[key] < activeDB[key] {
-			canAdd[key] = activeDB[key] - allocated[key]
+// buildCapacity constructs a map of partner → capacity based on the provided condition function.
+func buildCapacity(priority []string, cond func(string) int) map[string]int {
+	c := map[string]int{}
+	for _, k := range priority {
+		if v := cond(k); v > 0 {
+			c[k] = v
 		}
 	}
-	var canAddList []int
-	for _, key := range priority {
-		if c, ok := canAdd[key]; ok {
-			canAddList = append(canAddList, c)
+	return c
+}
+
+// capAtDBCount ensures no partner is allocated more than its db count.
+// It returns the total freed slots.
+func capAtDBCount(allocated, activeDB map[string]int) int {
+	freed := 0
+	for key, count := range allocated {
+		if count >= activeDB[key] {
+			freed += count - activeDB[key]
+			allocated[key] = activeDB[key]
 		}
 	}
-	rebalanceAllocation(allocated, priority, canAddList, canAdd, freed, +1)
+	return freed
 }
 
 // dropLowestPriority removes n lowest-priority partners from the allocation
@@ -231,23 +227,29 @@ func dropLowestPriority(allocated map[string]int, priority []string, n int) {
 // If we exhaust all participants but still have slots to remove/add, we will continue removing/adding from the lowest priority partners until we've removed/added all required slots respecting the capacity constraints.
 func rebalanceAllocation(allocated map[string]int,
 	priority []string,
-	participants []int,
 	capacity map[string]int,
 	units int,
 	sign int,
 ) {
 
-	sort.Slice(participants, func(i, j int) bool {
-		return participants[i] < participants[j]
-	})
+	type pair struct {
+		key string
+		cap int
+	}
+	var parts []pair
+	for k, c := range capacity {
+		parts = append(parts, pair{k, c})
+	}
+
+	sort.Slice(parts, func(i, j int) bool { return parts[i].cap < parts[j].cap })
 
 	totalRounds := 0
-	active := len(participants) // participants who can still be reduced
+	active := len(parts) // participants who can still be reduced
 	prev := 0
 
-	for i := range participants {
-		cur := participants[i] // next exhaustion point
-		gap := cur - prev      // how many rounds before this participant exhausts
+	for i := range parts {
+		cur := parts[i].cap // next exhaustion point
+		gap := cur - prev   // how many rounds before this participant exhausts
 
 		cost := gap * active // needs for those rounds
 
@@ -307,13 +309,4 @@ func buildSequence(allocated map[string]int, priority []string) []string {
 		active = next
 	}
 	return result
-}
-
-// sumValues returns the sum of all values in an int map.
-func sumValues(m map[string]int) int {
-	total := 0
-	for _, v := range m {
-		total += v
-	}
-	return total
 }
